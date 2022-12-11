@@ -30,7 +30,7 @@ async function saveMessage(message, author, id, reply) {
 
 		return result;
 	} catch (error) {
-		console.log(error);
+		console.log('Error: saveMessage');
 	} finally {
 		await dbClient.close();
 	}
@@ -45,7 +45,7 @@ async function getMessages() {
 
 		return messages;
 	} catch (error) {
-		console.log(error);
+		console.log('Error: getMessages');
 	}
 }
 
