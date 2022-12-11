@@ -131,8 +131,6 @@ async function generatePrompt(message, author, id) {
 
 const client = new Client({intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]});
 
-client.login(process.env.BOT_TOKEN);
-
 client.on('ready', () => {
 	console.log(`Logged in as ${client.user.tag}!`);
 });
