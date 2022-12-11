@@ -65,7 +65,9 @@ async function botReply(message, author, id) {
 		frequency_penalty: 0.5,
 		presence_penalty: 0.0,
 		stop: [`${author}:`],
-	});
+	}).catch(error => {
+		console.log('Error: botReply');
+	})
 
 	await saveMessage(message, author, id, completion.data.choices[0].text);
 
