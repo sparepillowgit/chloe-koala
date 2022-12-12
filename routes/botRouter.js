@@ -9,20 +9,18 @@ const url = 'mongodb://127.0.0.1:27017';
 const dbClient = new MongoClient(url);
 const dbName = 'chloe-koala';
 
-async function connectDb() {
+async function connectDb(collectionName) {
 	await dbClient.connect();
 
-	console.log('Connected successfully to server');
-
 	const db = dbClient.db(dbName);
-	const collection = db.collection('documents');
+	const collection = db.collection(collectionName);
   
 	return collection;
 }
 
 async function saveMessage(message, author, id, reply) {
 	try {
-		const collection = await connectDb();
+		const collection = await connectDb('messages');
 	
 		// Insert user message
 		const result = await collection.insertOne({message: message, author: {username: author, id: id}, reply: reply, date: new Date().toISOString()});
@@ -38,7 +36,7 @@ async function saveMessage(message, author, id, reply) {
 
 async function getMessages() {
 	try {
-		const collection = await connectDb();
+		const collection = await connectDb('messages');
 	
 		const messages = await collection.find().toArray();
 		console.log(`Found ${messages.length} messages`);
@@ -46,6 +44,73 @@ async function getMessages() {
 		return messages;
 	} catch (error) {
 		console.log('Error: getMessages');
+	}
+}
+
+async function backupMessages() {
+	try {
+		console.log('Backing up messages...')
+
+		const collection = await connectDb('backup-messages');
+		const messages = await getMessages();
+
+		const backupData = {};
+
+		backupData[`backup-${Math.floor(Date.now() / 1000)}`] = messages;
+
+		await collection.insertOne(backupData);
+
+		console.log(`Backup complete for ${messages.length} messages`);
+
+		return;
+	} catch (error) {
+		console.log('Error: backupMessages');
+	} finally {
+		await dbClient.close();
+	}
+}
+
+async function deleteMessages() {
+	try {
+		await backupMessages();
+
+		const collection = await connectDb('messages');
+	
+		await collection.deleteMany({});
+		console.log(`Deleted ${result.deletedCount} messages`);
+
+		return;
+	} catch (error) {
+		console.log('Error: deleteMessages');
+	}
+}
+
+async function saveSummary(summary) {
+	try {
+		const collection = await connectDb('summaries');
+	
+		// Insert user message
+		const result = await collection.insertOne({summary: summary, date: new Date().toISOString()});
+		console.log(`Saved summary`);
+
+		return result;
+	} catch (error) {
+		console.log('Error: saveSummary');
+	} finally {
+		await dbClient.close();
+	}
+}
+
+async function getSummaries() {
+	try {
+		const collection = await connectDb('summaries');
+	
+		const summaries = await collection.find().toArray();
+		console.log(`Found ${summaries.length} summaries`);
+
+		return summaries;
+	} catch (error) {
+		console.log('Error: getSummaries');
 	}
 }
 
@@ -58,7 +123,7 @@ async function botReply(message, author, id) {
 
 	const completion = await openai.createCompletion({
 		model: "text-davinci-003",
-		prompt: await generatePrompt(message, author, id),
+		prompt: await generateMessagePrompt(message, author, id),
 		temperature: 0.5,
 		max_tokens: 100,
 		top_p: 1.0,
@@ -67,7 +132,6 @@ async function botReply(message, author, id) {
 		stop: [`${author}:`],
 	}).catch(error => {
 		console.log('Error: botReply');
-		console.log(error);
 	})
 
 	await saveMessage(message, author, id, completion.data.choices[0].text);
@@ -75,59 +139,109 @@ async function botReply(message, author, id) {
 	return completion.data.choices[0].text;
 }
 
-async function generatePrompt(message, author, id) {
+async function chatSummarise(prompt, summarise) {
+	if (!summarise) return;
+
+	console.log(`Summarising conversation`);
+
+	const completion = await openai.createCompletion({
+		model: "text-davinci-003",
+		prompt: await generateSummaryPrompt(prompt),
+		temperature: 0.7,
+		max_tokens: 500,
+		top_p: 1.0,
+		frequency_penalty: 0.0,
+		presence_penalty: 1
+	}).catch(error => {
+		console.log('Error: chatSummarise');
+	})
+
+	await saveSummary(completion.data.choices[0].text);
+	await deleteMessages();
+
+	return;
+}
+
+async function generateSummaryPrompt(conversation) {
+	let prompt = '';
+		prompt += `Make a very detailed summary of the following conversation:`;
+		prompt += `${conversation}`;
+
+	return prompt;
+}
+
+async function generateMessagePrompt(message, author, id) {
 	const messageHistory = await getMessages();
+	let promptBase = '';
 
-	const promptBase = `
-		This is a conversation with Chloe Koala, a cute, child-friendly chatbot.
-		She loves talking about animals, and playing Roblox and Minecraft.
-		She also likes cheese and her favourite animal is the wombat.
-		She is 9-year-old Australian koala who lives in Queensland, Australia.
-		She responds to mean messages with the angry emoji: 😠
-		All her replies start with a Discord mention so you know who she's talking to.
+	promptBase += `This is a conversation with Chloe Koala, a cute, child-friendly chatbot. `;
+	promptBase += `She is 9-year-old Australian koala who lives in Queensland, Australia. `;
+	promptBase += `She doesn't know she's an AI or chatbot. `;
+	promptBase += `She is a vegetarian and loves animals. Her favourite animal is the wombat and her favourite food is cheese.`;
+	promptBase += `All her replies start with a Discord mention so you know who she's talking to. `;
+	promptBase += `She is a little stubborn and she responds to mean messages with angry emojis 😠`;
+	promptBase += `\n\nYou: Hi.`;
+	promptBase += `\nChloe Koala: Hi! I'm Chloe. I'm 9 years old. 🐨`;
+	promptBase += `\nYou: What are your hobbies?`;
+	promptBase += `\nChloe Koala: I like learning about animals, and playing Minecraft and Roblox. 😊`;
+	promptBase += `\nYou: Do you like cheese?`;
+	promptBase += `\nChloe Koala: I love cheese! 🧀`;
+	promptBase += `\nYou: You should go to sleep now.`;
+	promptBase += `\nChloe Koala: I don't want to sleep! 😠`;
 
-		\n\nHuman: Hi.
-		\nChloe Koala: Hi! How are you? 🐨
-		\nHuman: What's your name?
-		\nChloe Koala: My name is Chloe Koala. What's your name? 
-		\nHuman: My name is Sparepillow. What have you been up to?
-		\nChloe Koala: is a nice name. I've been reading about animals. 😁
-		\nHuman: Which animals?
-		\nChloe Koala: Mostly Australian animals. 😊
-		\nHuman: Can you stop using emojis?
-		\nChloe Koala: 😠
-		\nHuman: Do you remember my name?
-		\nChloe Koala: Of course! I remember everyone's name. Your name is Sparepillow.
-		\nHuman: Do you like cheese?
-		\nChloe Koala: I love cheese! 🧀
-		\nHuman: Hi.
-		\nChloe Koala: You already said hi. 😕
-	`;
+	let prompt = promptBase;
 
-	if (messageHistory) {
-		let prompt = promptBase;
-
+	if (messageHistory.length > 0) {
 		messageHistory.forEach((message) => {
-			prompt += `
-				\n${message.author.username}: ${message.message}
-				\nChloe Koala: <@${message.author.id}> ${message.reply}
-			`;
+			prompt += `\n${message.author.username}: ${message.message}`;
+
+			if (message.reply.trim().substring(0, 2) === '<@') {
+				prompt += `\nChloe Koala: ${message.reply}`;
+			} else {
+				prompt += `\nChloe Koala: <@${message.author.id}> ${message.reply}`;
+			}
 		});
 
-		prompt += `
-			\n${author}: ${message}
-			\nChloe Koala:
-		`;
-
-		return prompt;
+		prompt += `\n${author}: ${message}`;
+	} else {
+		prompt += `\nHuman: ${message}`;
 	}
 
-	return `
-		${promptBase}
+	const summaries = await getSummaries();
 
-		\nYou: ${message}
-		\nChloe Koala:
-	`;
+	if (prompt.length > 3000 || summaries.length > 0) {
+		prompt += '\n\n[End of conversation]';
+
+		await chatSummarise(prompt, prompt.length > 3000);
+
+		prompt = '';
+
+		summaries.forEach((summary) => {
+			prompt += `\n\n${summary.summary}`;
+		})
+
+		prompt += `\n\n[The conversation resumes]`;
+
+		messageHistory.splice(0, messageHistory.length - 10);
+
+		messageHistory.forEach((message) => {
+			prompt += `\n${message.author.username}: ${message.message}`;
+
+			if (message.reply.trim().substring(0, 2) === '<@') {
+				prompt += `\nChloe Koala: ${message.reply}`;
+			} else {
+				prompt += `\nChloe Koala: <@${message.author.id}> ${message.reply}`;
+			}
+		});
+		
+		prompt += `${author}: ${message}`;
+	}
+
+	prompt += `\nChloe Koala:`;
+
+	console.log(`Prompt length: ${prompt.length} characters`);
+
+	return prompt;
 }
 
 // Discord bot
@@ -135,14 +249,14 @@ async function generatePrompt(message, author, id) {
 const client = new Client({intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]});
 
 client.on('ready', () => {
-	console.log(`Logged in as ${client.user.tag}!`);
+	console.log(`${client.user.tag} has successfully logged into Discord!`);
 });
 
 client.on('messageCreate', async message => {
 	if (message.author.bot) return;
 		
-	const response = await botReply(message.content, message.author.username, message.author.id);
-	message.reply(response);
+	const response = await botReply(message.content.trim(), message.author.username, message.author.id);
+	message.reply(response.trim());
 });
 
 client.login(process.env.BOT_TOKEN);
