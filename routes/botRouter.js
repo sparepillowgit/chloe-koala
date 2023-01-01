@@ -18,13 +18,13 @@ async function connectDb(collectionName) {
 	return collection;
 }
 
-async function saveMessage(message, author, id, reply) {
+async function saveMessage(message, author, reply) {
 	try {
 		const collection = await connectDb('messages');
 	
 		// Insert user message
-		const result = await collection.insertOne({message: message, author: {username: author, id: id}, reply: reply, date: new Date().toISOString()});
-		console.log(`Saved message from ${author} with id ${id}`);
+		const result = await collection.insertOne({message: message, author: {username: author}, reply: reply, date: new Date().toISOString()});
+		console.log(`Saved message from ${author}`);
 
 		return result;
 	} catch (error) {
@@ -118,12 +118,10 @@ async function getSummaries() {
 
 const openai = new OpenAIApi(new Configuration({apiKey: process.env.OPENAI_API_KEY,}));
 
-async function botReply(message, author, id) {
-	console.log(`Getting reply for "${author}#${id}: ${message}"`);
-
+async function botReply(message, author) {
 	const completion = await openai.createCompletion({
 		model: "text-davinci-003",
-		prompt: await generateMessagePrompt(message, author, id),
+		prompt: await generateMessagePrompt(message, author),
 		temperature: 0.5,
 		max_tokens: 100,
 		top_p: 1.0,
@@ -134,7 +132,7 @@ async function botReply(message, author, id) {
 		console.log('Error: botReply');
 	})
 
-	await saveMessage(message, author, id, completion.data.choices[0].text);
+	await saveMessage(message, author, completion.data.choices[0].text);
 
 	return completion.data.choices[0].text;
 }
@@ -170,7 +168,7 @@ async function generateSummaryPrompt(conversation) {
 	return prompt;
 }
 
-async function generateMessagePrompt(message, author, id) {
+async function generateMessagePrompt(message, author) {
 	const messageHistory = await getMessages();
 	let promptBase = '';
 
@@ -178,7 +176,6 @@ async function generateMessagePrompt(message, author, id) {
 	promptBase += `She is 9-year-old Australian koala who lives in Queensland, Australia. `;
 	promptBase += `She doesn't know she's an AI or chatbot. `;
 	promptBase += `She is a vegetarian and loves animals. Her favourite animal is the wombat and her favourite food is cheese.`;
-	promptBase += `All her replies start with a Discord mention so you know who she's talking to. `;
 	promptBase += `She is a little stubborn and she responds to mean messages with angry emojis 😠`;
 	promptBase += `\n\nYou: Hi.`;
 	promptBase += `\nChloe Koala: Hi! I'm Chloe. I'm 9 years old. 🐨`;
@@ -198,7 +195,7 @@ async function generateMessagePrompt(message, author, id) {
 			if (message.reply.trim().substring(0, 2) === '<@') {
 				prompt += `\nChloe Koala: ${message.reply}`;
 			} else {
-				prompt += `\nChloe Koala: <@${message.author.id}> ${message.reply}`;
+				prompt += `\nChloe Koala: ${message.reply}`;
 			}
 		});
 
@@ -230,7 +227,7 @@ async function generateMessagePrompt(message, author, id) {
 			if (message.reply.trim().substring(0, 2) === '<@') {
 				prompt += `\nChloe Koala: ${message.reply}`;
 			} else {
-				prompt += `\nChloe Koala: <@${message.author.id}> ${message.reply}`;
+				prompt += `\nChloe Koala: ${message.reply}`;
 			}
 		});
 		
@@ -255,7 +252,7 @@ client.on('ready', () => {
 client.on('messageCreate', async message => {
 	if (message.author.bot) return;
 		
-	const response = await botReply(message.content.trim(), message.author.username, message.author.id);
+	const response = await botReply(message.content.trim(), message.author.username);
 	message.reply(response.trim());
 });
 
